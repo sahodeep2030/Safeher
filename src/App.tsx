@@ -3,6 +3,11 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Shield, Home, Navigation, AlertTriangle, FileText, Users, User, X, LogIn, Heart, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Page, RouteInfo, IncidentReport } from './types';
 
+// Firebase imports
+import { auth, db, isConfigured, seedInitialData } from './firebase';
+import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { collection, onSnapshot, query, addDoc } from 'firebase/firestore';
+
 // Page imports
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
@@ -26,6 +31,56 @@ export default function App() {
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [activeRoute, setActiveRoute] = useState<RouteInfo | null>(null);
   const [customReports, setCustomReports] = useState<IncidentReport[]>([]);
+
+  // Seed initial data if Firebase is configured
+  useEffect(() => {
+    if (isConfigured && db) {
+      seedInitialData();
+    }
+  }, []);
+
+  // Listen to Firestore real-time updates for incidents
+  useEffect(() => {
+    if (isConfigured && db) {
+      const q = query(collection(db, 'incidents'));
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const reportsList: IncidentReport[] = [];
+        snapshot.forEach((doc) => {
+          const data = doc.data();
+          reportsList.push({
+            id: doc.id,
+            type: data.type,
+            description: data.description,
+            dateTime: data.dateTime,
+            locationName: data.locationName,
+            coordinates: data.coordinates,
+            isAnonymous: data.isAnonymous,
+            status: data.status,
+            reporter: data.reporter,
+            upvotes: data.upvotes || 0,
+          });
+        });
+        setCustomReports(reportsList);
+      }, (error) => {
+        console.error("Firestore onSnapshot error:", error);
+      });
+      return () => unsubscribe();
+    }
+  }, []);
+
+  // Listen to Firebase Auth state change
+  useEffect(() => {
+    if (isConfigured && auth) {
+      const unsubscribe = onAuthStateChanged(auth, (user) => {
+        if (user) {
+          setIsLoggedIn(true);
+        } else {
+          setIsLoggedIn(false);
+        }
+      });
+      return () => unsubscribe();
+    }
+  }, []);
 
   // Toast System State
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -68,9 +123,8 @@ export default function App() {
   };
 
   // Submit new incident from reporter form
-  const handleAddIncidentReport = (reportData: any) => {
-    const formattedReport: IncidentReport = {
-      id: `custom-${Math.random().toString()}`,
+  const handleAddIncidentReport = async (reportData: any) => {
+    const formattedReport = {
       type: reportData.type,
       description: reportData.description,
       dateTime: 'Reported just now',
@@ -82,26 +136,74 @@ export default function App() {
       upvotes: 1
     };
 
-    setCustomReports((prev) => [formattedReport, ...prev]);
+    if (isConfigured && db) {
+      try {
+        await addDoc(collection(db, 'incidents'), formattedReport);
+        handleToast('Safety report filed on Firebase Firestore!', 'success');
+      } catch (error: any) {
+        console.error(error);
+        handleToast(`Failed to save to Firebase: ${error.message}`, 'warn');
+      }
+    } else {
+      // Fallback local memory state
+      const localReport: IncidentReport = {
+        id: `custom-${Math.random().toString()}`,
+        ...formattedReport
+      };
+      setCustomReports((prev) => [localReport, ...prev]);
+      handleToast('Safety report filed (Local mockup mode)', 'success');
+    }
     handlePageChange('community');
   };
 
-  // Mock Login Action
-  const handleLoginSubmit = (e: React.FormEvent) => {
+  // Login Action with Firebase Integration and mockup fallback
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!loginEmail.trim() || !loginPassword.trim()) {
       handleToast('Please fill out all credentials', 'warn');
       return;
     }
 
-    setIsLoggedIn(true);
-    setLoginModalOpen(false);
-    handleToast('Welcome back, Aria Sharma! Security Sentinel Active.', 'success');
+    if (isConfigured && auth) {
+      try {
+        await signInWithEmailAndPassword(auth, loginEmail, loginPassword);
+        setLoginModalOpen(false);
+        handleToast('Welcome back! Firebase Session Active.', 'success');
+      } catch (error: any) {
+        console.error("Firebase Login Error:", error);
+        if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential' || error.code === 'auth/invalid-email') {
+          // Auto-registration for convenience in this prototype/demo
+          try {
+            const { createUserWithEmailAndPassword } = await import('firebase/auth');
+            await createUserWithEmailAndPassword(auth, loginEmail, loginPassword);
+            setLoginModalOpen(false);
+            handleToast('Account registered and logged in successfully!', 'success');
+          } catch (signUpErr: any) {
+            handleToast(`Firebase Credentials Error: ${error.message}`, 'warn');
+          }
+        } else {
+          handleToast(`Authentication failed: ${error.message}`, 'warn');
+        }
+      }
+    } else {
+      setIsLoggedIn(true);
+      setLoginModalOpen(false);
+      handleToast('Welcome back, Aria Sharma! (Mock Session Active)', 'success');
+    }
   };
 
-  const handleLogoutAction = () => {
-    setIsLoggedIn(false);
-    handleToast('Logged out of SafeHer session.', 'info');
+  const handleLogoutAction = async () => {
+    if (isConfigured && auth) {
+      try {
+        await signOut(auth);
+        handleToast('Logged out of Firebase session.', 'info');
+      } catch (error: any) {
+        handleToast(`Logout failed: ${error.message}`, 'warn');
+      }
+    } else {
+      setIsLoggedIn(false);
+      handleToast('Logged out of SafeHer session.', 'info');
+    }
   };
 
   return (
@@ -166,6 +268,7 @@ export default function App() {
               <CommunityPage
                 onToast={handleToast}
                 customReports={customReports}
+                isDbActive={isConfigured}
               />
             )}
 

@@ -3,13 +3,16 @@ import { motion } from 'motion/react';
 import { Users, Filter, Star, AlertTriangle, Eye, ThumbsUp, Landmark, ShieldCheck, HelpCircle, MessageSquare } from 'lucide-react';
 import { IncidentReport, CommunityComment } from '../types';
 import MapPlaceholder from './MapPlaceholder';
+import { db } from '../firebase';
+import { doc, updateDoc, increment } from 'firebase/firestore';
 
 interface CommunityPageProps {
   onToast: (msg: string, type: 'info' | 'success' | 'warn') => void;
   customReports?: IncidentReport[];
+  isDbActive?: boolean;
 }
 
-export default function CommunityPage({ onToast, customReports = [] }: CommunityPageProps) {
+export default function CommunityPage({ onToast, customReports = [], isDbActive = false }: CommunityPageProps) {
   const [filter, setFilter] = useState<string>('all');
 
   // Filter chips list
@@ -74,7 +77,7 @@ export default function CommunityPage({ onToast, customReports = [] }: Community
     }
   ];
 
-  const allReports = [...customReports, ...initialReports];
+  const allReports = isDbActive ? customReports : [...customReports, ...initialReports];
 
   // Filter reports
   const filteredReports = allReports.filter((rep) => {
@@ -124,8 +127,21 @@ export default function CommunityPage({ onToast, customReports = [] }: Community
     }
   ];
 
-  const handleUpvote = (id: string) => {
-    onToast('Safety score upvoted! Data verified.', 'success');
+  const handleUpvote = async (id: string) => {
+    if (isDbActive && db) {
+      try {
+        const docRef = doc(db, 'incidents', id);
+        await updateDoc(docRef, {
+          upvotes: increment(1)
+        });
+        onToast('Safety score upvoted in Firestore! Data verified.', 'success');
+      } catch (error: any) {
+        console.error("Firestore Upvote Error:", error);
+        onToast(`Upvote failed: ${error.message}`, 'warn');
+      }
+    } else {
+      onToast('Safety score upvoted! (Local mockup mode)', 'success');
+    }
   };
 
   const handleChipClick = (id: string) => {
