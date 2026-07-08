@@ -1,0 +1,93 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  --color-brand-purple: #7C3AED;
+  --color-brand-teal: #14B8A6;
+  --color-brand-coral: #FB7185;
+}
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-800 antialiased font-sans selection:bg-violet-100 selection:text-violet-900;
+  }
+}
+
+/* Custom CSS utilities for map/animations */
+.glow-pulse-purple {
+  box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.4);
+  animation: pulse-purple 2s infinite;
+}
+
+@keyframes pulse-purple {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.7);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 10px rgba(124, 58, 237, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(124, 58, 237, 0);
+  }
+}
+
+.glow-pulse-red {
+  box-shadow: 0 0 0 0 rgba(251, 113, 133, 0.4);
+  animation: pulse-red 1.5s infinite;
+}
+
+@keyframes pulse-red {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(251, 113, 133, 0.7);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 15px rgba(251, 113, 133, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(251, 113, 133, 0);
+  }
+}
+
+.glow-pulse-teal {
+  box-shadow: 0 0 0 0 rgba(20, 184, 166, 0.4);
+  animation: pulse-teal 2s infinite;
+}
+
+@keyframes pulse-teal {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(20, 184, 166, 0.7);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 10px rgba(20, 184, 166, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(20, 184, 166, 0);
+  }
+}
+
+/* Glassmorphism utility */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+}
+
+.glass-panel-dark {
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}

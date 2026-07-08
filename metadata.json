@@ -1,0 +1,6 @@
+{
+  "name": "SafeHer",
+  "description": "A modern, secure, and trusted women's safety platform with safe route navigation, SOS emergency help, live trip monitoring, incident reporting, and community safety.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
