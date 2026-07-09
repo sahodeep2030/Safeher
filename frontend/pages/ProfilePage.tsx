@@ -6,9 +6,10 @@ import { EmergencyContact, SavedPlace, JourneyHistoryItem } from '../types';
 interface ProfilePageProps {
   onToast: (msg: string, type: 'info' | 'success' | 'warn') => void;
   onNavigateTo: (page: 'home' | 'safe-route' | 'emergency' | 'report' | 'community' | 'profile') => void;
+  currentUser: { email: string | null; displayName: string | null } | null;
 }
 
-export default function ProfilePage({ onToast, onNavigateTo }: ProfilePageProps) {
+export default function ProfilePage({ onToast, onNavigateTo, currentUser }: ProfilePageProps) {
   // Safety Preferences States
   const [prefAutoDeviation, setPrefAutoDeviation] = useState(true);
   const [prefLockTrigger, setPrefLockTrigger] = useState(true);
@@ -83,12 +84,12 @@ export default function ProfilePage({ onToast, onNavigateTo }: ProfilePageProps)
 
         <div className="space-y-2 text-center md:text-left relative z-10">
           <div className="flex flex-col sm:flex-row sm:items-center justify-center md:justify-start gap-2">
-            <h2 className="text-xl sm:text-2xl font-bold">Aria Sharma</h2>
+            <h2 className="text-xl sm:text-2xl font-bold">{currentUser?.displayName || 'Aria Sharma'}</h2>
             <span className="text-[10px] font-bold text-teal-400 uppercase tracking-widest bg-teal-900/40 border border-teal-800 px-2.5 py-0.5 rounded-full inline-block mx-auto sm:mx-0 shrink-0">
               ✓ Sentinel Profile Verified
             </span>
           </div>
-          <p className="text-xs text-slate-400">Primary phone connected: <strong>+91 99100 23456</strong></p>
+          <p className="text-xs text-slate-400">Primary email connected: <strong>{currentUser?.email || 'aria@safeher-grid.org'}</strong></p>
           <p className="text-xs text-slate-400 leading-relaxed max-w-lg">
             Active guard member since May 2026. Aria has participated in 14 community lighting reviews, logged 3 construction bypass flags, and completed 42 safe route trips.
           </p>

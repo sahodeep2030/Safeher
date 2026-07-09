@@ -2,15 +2,25 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Play, Square, Shield, AlertTriangle, Phone, Share2, Compass, MapPin, Navigation, Car, AlertOctagon, Heart, User, CheckCircle } from 'lucide-react';
 import { RouteInfo } from '../types';
-import MapPlaceholder from './MapPlaceholder';
+import MapPlaceholder from '../components/MapPlaceholder';
 
 interface LiveMonitoringPageProps {
   activeRoute: RouteInfo | null;
   onToast: (msg: string, type: 'info' | 'success' | 'warn') => void;
   onNavigateTo: (page: 'home' | 'safe-route' | 'emergency' | 'report' | 'community' | 'profile') => void;
+  userLocation?: { latitude: number; longitude: number; accuracy: number; speed: number | null } | null;
+  isTracking?: boolean;
+  stopTracking?: () => void;
 }
 
-export default function LiveMonitoringPage({ activeRoute, onToast, onNavigateTo }: LiveMonitoringPageProps) {
+export default function LiveMonitoringPage({
+  activeRoute,
+  onToast,
+  onNavigateTo,
+  userLocation,
+  isTracking = false,
+  stopTracking
+}: LiveMonitoringPageProps) {
   // If no route is active, default to Corridor Alfa for visual fidelity
   const fallbackRoute: RouteInfo = {
     id: 'route-safest',
@@ -145,6 +155,9 @@ export default function LiveMonitoringPage({ activeRoute, onToast, onNavigateTo 
               onSimulationProgress={handleProgressUpdate}
               start={route.start}
               destination={route.destination}
+              startCoords={route.startCoords}
+              destinationCoords={route.destinationCoords}
+              userLocation={userLocation}
             />
           </div>
 

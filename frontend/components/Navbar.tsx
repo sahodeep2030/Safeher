@@ -9,6 +9,7 @@ interface NavbarProps {
   onOpenLoginModal: () => void;
   isLoggedIn: boolean;
   onLogout: () => void;
+  currentUser: { email: string | null; displayName: string | null } | null;
 }
 
 interface NavItem {
@@ -18,7 +19,7 @@ interface NavItem {
   highlight?: boolean;
 }
 
-export default function Navbar({ currentPage, setCurrentPage, onOpenLoginModal, isLoggedIn, onLogout }: NavbarProps) {
+export default function Navbar({ currentPage, setCurrentPage, onOpenLoginModal, isLoggedIn, onLogout, currentUser }: NavbarProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const navItems: NavItem[] = [
@@ -94,7 +95,7 @@ export default function Navbar({ currentPage, setCurrentPage, onOpenLoginModal, 
                     referrerPolicy="no-referrer"
                     className="w-8 h-8 rounded-full border-2 border-violet-200 object-cover"
                   />
-                  <span className="text-xs font-semibold text-slate-700">Aria Sharma</span>
+                  <span className="text-xs font-semibold text-slate-700">{currentUser?.displayName || 'Aria Sharma'}</span>
                 </div>
                 <button
                   onClick={onLogout}
@@ -199,7 +200,7 @@ export default function Navbar({ currentPage, setCurrentPage, onOpenLoginModal, 
                         className="w-10 h-10 rounded-full border-2 border-violet-100 object-cover"
                       />
                       <div>
-                        <p className="text-xs font-semibold text-slate-800">Aria Sharma</p>
+                        <p className="text-xs font-semibold text-slate-800">{currentUser?.displayName || 'Aria Sharma'}</p>
                         <p className="text-[10px] text-teal-600">Security Active</p>
                       </div>
                     </div>

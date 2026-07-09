@@ -5,19 +5,26 @@ import { EmergencyContact } from '../types';
 
 interface EmergencyPageProps {
   onToast: (msg: string, type: 'info' | 'success' | 'warn') => void;
+  currentUser: { email: string | null; displayName: string | null } | null;
 }
 
-export default function EmergencyPage({ onToast }: EmergencyPageProps) {
+export default function EmergencyPage({ onToast, currentUser }: EmergencyPageProps) {
   const [sosCountdown, setSosCountdown] = useState<number | null>(null);
   const [sosTriggered, setSosTriggered] = useState(false);
   const [activeTab, setActiveTab] = useState<'contacts' | 'chat'>('contacts');
 
   // Emergency Chat State
   const [chatInput, setChatInput] = useState('');
-  const [chatMessages, setChatMessages] = useState([
-    { id: '1', sender: 'system', text: 'Connecting to 24/7 SafeHer Command Center...', time: '12:00 PM' },
-    { id: '2', sender: 'agent', text: 'Hello, I am Security Advisor Neha. We are tracking your live GPS stream. Please tell us how we can assist you.', time: '12:01 PM' }
-  ]);
+  const [chatMessages, setChatMessages] = useState<any[]>([]);
+  const [isLoadingAgent, setIsLoadingAgent] = useState(false);
+
+  useEffect(() => {
+    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    setChatMessages([
+      { id: '1', sender: 'system', text: 'Secure AI Sentinel session established.', time: timeStr },
+      { id: '2', sender: 'agent', text: `Hello ${currentUser?.displayName || 'Aria'}. I am your SafeHer AI Emergency Sentinel. I am monitoring your live GPS coordinates. Please tell me: Are you currently in immediate danger, or has your route deviated?`, time: timeStr }
+    ]);
+  }, [currentUser]);
 
   // Initial Emergency Contacts
   const [contacts, setContacts] = useState<EmergencyContact[]>([
@@ -73,9 +80,9 @@ export default function EmergencyPage({ onToast }: EmergencyPageProps) {
     onToast(`Initiating direct emergency call to ${type} (${number})...`, 'warn');
   };
 
-  const handleSendMessage = (e: React.FormEvent) => {
+  const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!chatInput.trim()) return;
+    if (!chatInput.trim() || isLoadingAgent) return;
 
     const userMsg = {
       id: Math.random().toString(),
@@ -86,24 +93,88 @@ export default function EmergencyPage({ onToast }: EmergencyPageProps) {
 
     setChatMessages(prev => [...prev, userMsg]);
     setChatInput('');
+    setIsLoadingAgent(true);
 
-    // Simulate Agent Response
-    setTimeout(() => {
-      const responses = [
-        'Understood. I have locked your location coordinates. Directing a safety cruiser to your exact street grid. Stay on the line.',
-        'We have alerted your emergency contacts. Aria and Rohit are viewing your live position. A PCR police van is being notified.',
-        'Received. Are you in a public or private vehicle? Please share the driver details if possible.'
-      ];
-      const randomAgentResponse = responses[Math.floor(Math.random() * responses.length)];
-      
-      setChatMessages(prev => [...prev, {
-        id: Math.random().toString(),
-        sender: 'agent',
-        text: randomAgentResponse,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      }]);
-      onToast('Safety center responded!', 'success');
-    }, 1500);
+    try {
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      if (apiKey && apiKey !== "MY_GEMINI_API_KEY" && apiKey !== "") {
+        const historyForGemini = chatMessages
+          .filter(msg => msg.sender === 'user' || msg.sender === 'agent')
+          .map(msg => ({
+            role: msg.sender === 'user' ? 'user' as const : 'model' as const,
+            text: msg.text
+          }));
+        
+        historyForGemini.push({ role: 'user', text: userMsg.text });
+
+        const systemInstruction = `You are the SafeHer AI Emergency Sentinel, an empathetic, urgent, and professional safety dispatch coordinator built into the SafeHer personal security app.
+Your objective is to guide users who have triggered an SOS or feel unsafe.
+Rules:
+1. Act with urgency, empathy, and absolute calm. Keep your tone reassuring.
+2. Keep responses brief (max 2-3 sentences) so they can be read quickly in stressful situations.
+3. Suggest practical safety actions based on what they report:
+   - If they are followed: advise walking to a well-lit, public business.
+   - If vehicle deviates: advise opening windows, calling out, and preparing an emergency contact alert.
+   - If medical threat: advise staying still, locking doors, and confirming dispatch of assistance.
+4. Address them by name if they are named ${currentUser?.displayName || 'Aria'}.
+5. Confirm that SafeHer has locked their GPS position and is standing by to alert authorities.`;
+
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            contents: historyForGemini.map(m => ({
+              role: m.role,
+              parts: [{ text: m.text }]
+            })),
+            systemInstruction: {
+              parts: [{ text: systemInstruction }]
+            },
+            generationConfig: {
+              maxOutputTokens: 200,
+              temperature: 0.3,
+            }
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error('Gemini API call failed.');
+        }
+
+        const result = await response.json();
+        const responseText = result.candidates?.[0]?.content?.parts?.[0]?.text || "I am tracking your position. Please stay in a secure public area if possible.";
+
+        setChatMessages(prev => [...prev, {
+          id: Math.random().toString(),
+          sender: 'agent',
+          text: responseText.trim(),
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }]);
+        setIsLoadingAgent(false);
+        onToast('AI Sentinel responded.', 'success');
+      } else {
+        throw new Error("No API Key configured.");
+      }
+    } catch (error) {
+      console.warn("Falling back to pre-programmed responses:", error);
+      setTimeout(() => {
+        const responses = [
+          'SafeHer Sentinel: We have locked your coordinates and notified your emergency contacts. A safety coordinator is alerted. Stay in a public area.',
+          'SafeHer Sentinel: Understood. Are you in a public space? Please seek a populated area while we monitor your GPS stream.',
+          'SafeHer Sentinel: Distress transmission confirmed. Avoid dark corridors. Walk towards security checkpoints or active market stalls.'
+        ];
+        const fallbackMsg = responses[Math.floor(Math.random() * responses.length)];
+        setChatMessages(prev => [...prev, {
+          id: Math.random().toString(),
+          sender: 'agent',
+          text: fallbackMsg,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }]);
+        setIsLoadingAgent(false);
+      }, 1000);
+    }
   };
 
   const handleAddContact = (e: React.FormEvent) => {
@@ -241,7 +312,7 @@ export default function EmergencyPage({ onToast }: EmergencyPageProps) {
                   : 'border-transparent text-slate-500 hover:text-slate-800'
               }`}
             >
-              24/7 Safety Advisor Chat
+              AI Emergency Sentinel Chat
             </button>
           </div>
 
@@ -350,9 +421,28 @@ export default function EmergencyPage({ onToast }: EmergencyPageProps) {
               </div>
             ) : (
               /* Tab 2: Live Emergency Advisor Chat */
-              <div className="flex flex-col h-full">
+              <div className="flex flex-col h-full overflow-hidden">
+                {/* AI Sentinel Header Badge */}
+                <div className="flex items-center justify-between px-4 py-2 bg-slate-50 border-b border-slate-100 text-[10px] font-bold shrink-0">
+                  <div className="flex items-center gap-1.5 text-slate-500">
+                    <Shield className="w-3.5 h-3.5 text-violet-600" />
+                    <span>AI Emergency Sentinel Dispatch</span>
+                  </div>
+                  {import.meta.env.VITE_GEMINI_API_KEY ? (
+                    <span className="flex items-center gap-1 text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-100 uppercase tracking-wider">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                      Live AI Active
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1 text-violet-600 bg-violet-50 px-2.5 py-0.5 rounded-full border border-violet-100 uppercase tracking-wider">
+                      <span className="w-1.5 h-1.5 rounded-full bg-violet-400"></span>
+                      Simulated AI
+                    </span>
+                  )}
+                </div>
+
                 {/* Messages Panel */}
-                <div className="flex-1 space-y-4 overflow-y-auto mb-4 pr-1">
+                <div className="flex-1 space-y-4 overflow-y-auto mb-3 pr-1 px-4 py-2">
                   {chatMessages.map((msg) => (
                     <div
                       key={msg.id}
@@ -364,7 +454,7 @@ export default function EmergencyPage({ onToast }: EmergencyPageProps) {
                             ? 'bg-violet-600 text-white rounded-br-none'
                             : msg.sender === 'system'
                             ? 'bg-slate-100 text-slate-500 font-medium text-center text-[10px] w-full max-w-full'
-                            : 'bg-slate-50 text-slate-800 border border-slate-100 rounded-bl-none'
+                            : 'bg-slate-50 text-slate-800 border border-slate-100 rounded-bl-none font-medium'
                         }`}
                       >
                         {msg.text}
@@ -372,42 +462,57 @@ export default function EmergencyPage({ onToast }: EmergencyPageProps) {
                       <span className="text-[9px] text-slate-400 mt-1 font-semibold">{msg.time}</span>
                     </div>
                   ))}
+
+                  {/* Typing / Loading Agent State */}
+                  {isLoadingAgent && (
+                    <div className="flex flex-col max-w-[85%] mr-auto items-start animate-pulse">
+                      <div className="p-3 bg-violet-50 text-violet-600 border border-violet-100 rounded-2xl rounded-bl-none text-xs font-semibold flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-violet-600 animate-ping"></span>
+                        AI Sentinel is coordinating dispatch...
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Preset Fast Actions */}
-                <div className="flex flex-wrap gap-1.5 pb-3">
+                <div className="flex flex-wrap gap-1.5 pb-2.5 px-4 shrink-0">
                   <button
                     onClick={() => setChatInput('Help, I feel unsafe walking here!')}
-                    className="text-[10px] bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200/50 py-1 px-2.5 rounded-full transition cursor-pointer"
+                    disabled={isLoadingAgent}
+                    className="text-[10px] bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200/50 py-1 px-2.5 rounded-full transition cursor-pointer disabled:opacity-50"
                   >
                     "Feel unsafe walking"
                   </button>
                   <button
                     onClick={() => setChatInput('The cab driver has taken a strange route deviation.')}
-                    className="text-[10px] bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200/50 py-1 px-2.5 rounded-full transition cursor-pointer"
+                    disabled={isLoadingAgent}
+                    className="text-[10px] bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200/50 py-1 px-2.5 rounded-full transition cursor-pointer disabled:opacity-50"
                   >
                     "Cab deviation"
                   </button>
                   <button
                     onClick={() => setChatInput('My location coordinates look wrong.')}
-                    className="text-[10px] bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200/50 py-1 px-2.5 rounded-full transition cursor-pointer"
+                    disabled={isLoadingAgent}
+                    className="text-[10px] bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200/50 py-1 px-2.5 rounded-full transition cursor-pointer disabled:opacity-50"
                   >
                     "GPS verify"
                   </button>
                 </div>
 
                 {/* Input Text Form */}
-                <form onSubmit={handleSendMessage} className="flex gap-2">
+                <form onSubmit={handleSendMessage} className="flex gap-2 px-4 pb-4 shrink-0">
                   <input
                     type="text"
                     value={chatInput}
                     onChange={(e) => setChatInput(e.target.value)}
-                    placeholder="Type a message or tap quick shortcuts..."
-                    className="flex-1 bg-slate-50 border border-slate-200 text-xs px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500"
+                    disabled={isLoadingAgent}
+                    placeholder={isLoadingAgent ? "AI is typing safety instructions..." : "Type a message or tap quick shortcuts..."}
+                    className="flex-1 bg-slate-50 border border-slate-200 text-xs px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 disabled:opacity-60"
                   />
                   <button
                     type="submit"
-                    className="bg-violet-600 hover:bg-violet-700 text-white p-3 rounded-xl shrink-0 transition shadow-sm cursor-pointer"
+                    disabled={isLoadingAgent}
+                    className="bg-violet-600 hover:bg-violet-700 text-white p-3 rounded-xl shrink-0 transition shadow-sm cursor-pointer disabled:opacity-60"
                   >
                     <Send className="w-4.5 h-4.5" />
                   </button>

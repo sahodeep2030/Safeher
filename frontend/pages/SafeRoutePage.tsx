@@ -1,21 +1,269 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
 import { MapPin, Navigation, Eye, Heart, Shield, Activity, Landmark, Compass, Flame, AlertCircle, Info } from 'lucide-react';
 import { TravelMode, RouteInfo } from '../types';
-import MapPlaceholder from './MapPlaceholder';
-
+import MapPlaceholder from '../components/MapPlaceholder';
 interface SafeRoutePageProps {
   onStartJourney: (route: RouteInfo) => void;
   onToast: (msg: string, type: 'info' | 'success' | 'warn') => void;
+  userLocation?: { latitude: number; longitude: number; accuracy: number; speed: number | null } | null;
 }
 
-export default function SafeRoutePage({ onStartJourney, onToast }: SafeRoutePageProps) {
+const LOCAL_LANDMARKS = [
+  { description: 'DLF CyberCity, Gurugram, Haryana, India', place_id: 'mock-cybercity', name: 'DLF CyberCity' },
+  { description: 'Sector 29 Leisure Valley Park, Gurugram, Haryana, India', place_id: 'mock-sec29', name: 'Sector 29 Leisure Valley Park' },
+  { description: 'IFFCO Chowk Metro Station, Gurugram, Haryana, India', place_id: 'mock-iffco', name: 'IFFCO Chowk Metro Station' },
+  { description: 'MG Road Mall Mile, Gurugram, Haryana, India', place_id: 'mock-mgroad', name: 'MG Road Mall Mile' },
+  { description: 'Sector 56 Huda Market, Gurugram, Haryana, India', place_id: 'mock-sec56', name: 'Sector 56 Huda Market' },
+  { description: 'Golf Course Road, Sector 43, Gurugram, Haryana, India', place_id: 'mock-golfcourse', name: 'Golf Course Road' },
+  { description: 'Palam Market Cluster, Sector 7, Gurugram, Haryana, India', place_id: 'mock-palam', name: 'Palam Market Cluster' },
+  { description: 'Sector 4 Metro Underpass, Gurugram, Haryana, India', place_id: 'mock-sec4', name: 'Sector 4 Metro Underpass' },
+  { description: 'Vikas Public Park Gate 3, Gurugram, Haryana, India', place_id: 'mock-vikas', name: 'Vikas Public Park Gate 3' },
+];
+
+const MOCK_COORDS: Record<string, { lat: number; lng: number }> = {
+  'mock-cybercity': { lat: 28.5020, lng: 77.0880 },
+  'mock-sec29': { lat: 28.4720, lng: 77.0720 },
+  'mock-iffco': { lat: 28.4750, lng: 77.0730 },
+  'mock-mgroad': { lat: 28.4830, lng: 77.0800 },
+  'mock-sec56': { lat: 28.4350, lng: 77.1000 },
+  'mock-golfcourse': { lat: 28.4500, lng: 77.0980 },
+  'mock-palam': { lat: 28.4900, lng: 77.0800 },
+  'mock-sec4': { lat: 28.4962, lng: 77.0878 },
+  'mock-vikas': { lat: 28.4912, lng: 77.0838 },
+};
+
+const localGeocode = (addr: string): [number, number] | null => {
+  const normalized = addr.toLowerCase();
+  if (normalized.includes('current location') || normalized.includes('sector 6')) {
+    return [28.4962, 77.0878];
+  }
+  if (normalized.includes('cybercity') || normalized.includes('cyber city')) {
+    return [28.5020, 77.0880];
+  }
+  if (normalized.includes('leisure valley') || normalized.includes('sector 29')) {
+    return [28.4720, 77.0720];
+  }
+  if (normalized.includes('iffco')) {
+    return [28.4750, 77.0730];
+  }
+  if (normalized.includes('mg road') || normalized.includes('mall mile')) {
+    return [28.4830, 77.0800];
+  }
+  if (normalized.includes('sector 56')) {
+    return [28.4350, 77.1000];
+  }
+  if (normalized.includes('golf course')) {
+    return [28.4500, 77.0980];
+  }
+  if (normalized.includes('palam')) {
+    return [28.4900, 77.0800];
+  }
+  if (normalized.includes('underpass') || normalized.includes('sector 4')) {
+    return [28.4962, 77.0878];
+  }
+  if (normalized.includes('vikas') || normalized.includes('park')) {
+    return [28.4912, 77.0838];
+  }
+  if (normalized.includes('sambalpur')) {
+    return [21.4669, 83.9812];
+  }
+  if (normalized.includes('bhubaneswar') || normalized.includes('bhubaneshwar')) {
+    return [20.2961, 85.8245];
+  }
+  if (normalized.includes('delhi') || normalized.includes('new delhi')) {
+    return [28.6139, 77.2090];
+  }
+  if (normalized.includes('mumbai') || normalized.includes('bombay')) {
+    return [19.0760, 72.8777];
+  }
+  if (normalized.includes('bangalore') || normalized.includes('bengaluru')) {
+    return [12.9716, 77.5946];
+  }
+  if (normalized.includes('kolkata') || normalized.includes('calcutta')) {
+    return [22.5726, 88.3639];
+  }
+  if (normalized.includes('gurgaon') || normalized.includes('gurugram')) {
+    return [28.4595, 77.0266];
+  }
+  return null;
+};
+
+const getLocalMockupSuggestions = (query: string): any[] => {
+  const filtered = LOCAL_LANDMARKS.filter(landmark =>
+    landmark.description.toLowerCase().includes(query.toLowerCase())
+  );
+  return filtered.map(item => ({
+    description: item.description,
+    place_id: item.place_id,
+    types: ['geocode'],
+    matched_substrings: [],
+    structured_formatting: {
+      main_text: item.name,
+      secondary_text: 'Gurugram, Haryana, India',
+      main_text_matched_substrings: []
+    },
+    terms: []
+  }));
+};
+
+const fetchNominatimSuggestions = async (val: string): Promise<any[]> => {
+  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(val)}&format=json&limit=5&addressdetails=1&countrycodes=in`;
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'Accept-Language': 'en',
+        'User-Agent': 'SafeHer-Sentinel-App/1.0'
+      }
+    });
+    if (!response.ok) throw new Error('Nominatim query failed');
+    const data = await response.json();
+    if (data && Array.isArray(data)) {
+      return data.map((item: any) => ({
+        description: item.display_name,
+        place_id: `osm-${item.place_id}`,
+        types: [item.type || 'geocode'],
+        matched_substrings: [],
+        structured_formatting: {
+          main_text: item.name || item.display_name.split(',')[0],
+          secondary_text: item.display_name.split(',').slice(1).join(',').trim(),
+          main_text_matched_substrings: []
+        },
+        terms: [],
+        lat: parseFloat(item.lat),
+        lng: parseFloat(item.lon)
+      }));
+    }
+  } catch (err) {
+    console.warn('Nominatim autocomplete failed:', err);
+  }
+  return [];
+};
+
+export default function SafeRoutePage({ onStartJourney, onToast, userLocation }: SafeRoutePageProps) {
   const [start, setStart] = useState('My Current Location (Sector 6)');
   const [destination, setDestination] = useState('DLF CyberCity Gate 2');
   const [mode, setMode] = useState<TravelMode>('cab');
   const [calculating, setCalculating] = useState(false);
   const [showResults, setShowResults] = useState(true); // Default loaded with mock routes
   const [selectedRouteIndex, setSelectedRouteIndex] = useState(0);
+
+  const [startCoords, setStartCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [destinationCoords, setDestinationCoords] = useState<{ lat: number; lng: number } | null>(null);
+
+  const [startPredictions, setStartPredictions] = useState<any[]>([]);
+  const [destPredictions, setDestPredictions] = useState<any[]>([]);
+  const [showStartDropdown, setShowStartDropdown] = useState(false);
+  const [showDestDropdown, setShowDestDropdown] = useState(false);
+
+  useEffect(() => {
+    const handleDocumentClick = () => {
+      setShowStartDropdown(false);
+      setShowDestDropdown(false);
+    };
+    document.addEventListener('click', handleDocumentClick);
+    return () => document.removeEventListener('click', handleDocumentClick);
+  }, []);
+
+  useEffect(() => {
+    if (userLocation && (start === 'My Current Location (Sector 6)' || start === 'My Current Location')) {
+      setStart('My Current Location');
+      setStartCoords({ lat: userLocation.latitude, lng: userLocation.longitude });
+    }
+  }, [userLocation]);
+
+  const handleStartChange = async (val: string) => {
+    setStart(val);
+    setStartCoords(null);
+    if (!val.trim()) {
+      setStartPredictions([]);
+      return;
+    }
+    const suggestions = await fetchNominatimSuggestions(val);
+    if (suggestions && suggestions.length > 0) {
+      setStartPredictions(suggestions);
+      setShowStartDropdown(true);
+    } else {
+      const localSugg = getLocalMockupSuggestions(val);
+      setStartPredictions(localSugg);
+      setShowStartDropdown(localSugg.length > 0);
+    }
+  };
+
+  const handleDestChange = async (val: string) => {
+    setDestination(val);
+    setDestinationCoords(null);
+    if (!val.trim()) {
+      setDestPredictions([]);
+      return;
+    }
+    const suggestions = await fetchNominatimSuggestions(val);
+    if (suggestions && suggestions.length > 0) {
+      setDestPredictions(suggestions);
+      setShowDestDropdown(true);
+    } else {
+      const localSugg = getLocalMockupSuggestions(val);
+      setDestPredictions(localSugg);
+      setShowDestDropdown(localSugg.length > 0);
+    }
+  };
+
+  const handleSelectStartSuggestion = (pred: any) => {
+    setStart(pred.description);
+    setStartPredictions([]);
+    setShowStartDropdown(false);
+
+    if (pred.lat && pred.lng) {
+      setStartCoords({ lat: pred.lat, lng: pred.lng });
+      onToast('Starting point resolved!', 'success');
+    } else if (pred.place_id in MOCK_COORDS) {
+      setStartCoords(MOCK_COORDS[pred.place_id]);
+      onToast('Starting point resolved (simulated)!', 'success');
+    } else {
+      setStartCoords({ lat: 28.4962, lng: 77.0878 });
+    }
+  };
+
+  const handleSelectDestSuggestion = (pred: any) => {
+    setDestination(pred.description);
+    setDestPredictions([]);
+    setShowDestDropdown(false);
+
+    if (pred.lat && pred.lng) {
+      setDestinationCoords({ lat: pred.lat, lng: pred.lng });
+      onToast('Destination resolved!', 'success');
+    } else if (pred.place_id in MOCK_COORDS) {
+      setDestinationCoords(MOCK_COORDS[pred.place_id]);
+      onToast('Destination resolved (simulated)!', 'success');
+    } else {
+      setDestinationCoords({ lat: 28.5020, lng: 77.0880 });
+    }
+  };
+
+  const handleUseCurrentLocation = () => {
+    if (navigator.geolocation) {
+      onToast('Requesting location access...', 'info');
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const lat = position.coords.latitude;
+          const lng = position.coords.longitude;
+          setStart('My Current Location');
+          setStartCoords({ lat, lng });
+          onToast('Current location resolved!', 'success');
+        },
+        (err) => {
+          console.warn('Geolocation failed, engaging demo location fallback:', err.message);
+          const defaultCoords = { lat: 28.4962, lng: 77.0878 };
+          setStart('My Current Location (Demo)');
+          setStartCoords(defaultCoords);
+          onToast('Location access denied. Loaded simulated current location.', 'info');
+        },
+        { enableHighAccuracy: true, timeout: 8000 }
+      );
+    } else {
+      onToast('Location tracking is not supported by your browser.', 'warn');
+    }
+  };
 
   // Travel Modes Definition
   const travelModesList = [
@@ -26,7 +274,13 @@ export default function SafeRoutePage({ onStartJourney, onToast }: SafeRoutePage
   ] as const;
 
   // Dynamic Route Generator
-  const generateDynamicRoutes = (startVal: string, destVal: string, travelMode: TravelMode): RouteInfo[] => {
+  const generateDynamicRoutes = (
+    startVal: string, 
+    destVal: string, 
+    travelMode: TravelMode,
+    customStartCoords?: { lat: number; lng: number } | null,
+    customDestCoords?: { lat: number; lng: number } | null
+  ): RouteInfo[] => {
     const cleanStart = startVal.trim() || 'Sector 6';
     const cleanDest = destVal.trim() || 'DLF CyberCity';
     
@@ -39,6 +293,9 @@ export default function SafeRoutePage({ onStartJourney, onToast }: SafeRoutePage
     else if (travelMode === 'auto') speed = 26;
 
     const baseDurationMins = Math.max(3, Math.round((baseDistance / speed) * 60));
+
+    const sCoords = customStartCoords || startCoords || undefined;
+    const dCoords = customDestCoords || destinationCoords || undefined;
 
     return [
       {
@@ -57,7 +314,9 @@ export default function SafeRoutePage({ onStartJourney, onToast }: SafeRoutePage
         description: `Stays strictly on double-lane major arterial roads from ${cleanStart} to ${cleanDest}. Fully lit and monitored continuously by police checkpoints and city-wide smart surveillance network.`,
         features: ['100% Well-Lit Roads', 'Frequent Police Checkpoints', 'Active High-Density Footfall'],
         start: cleanStart,
-        destination: cleanDest
+        destination: cleanDest,
+        startCoords: sCoords,
+        destinationCoords: dCoords
       },
       {
         id: 'route-alternate',
@@ -75,7 +334,9 @@ export default function SafeRoutePage({ onStartJourney, onToast }: SafeRoutePage
         description: `An alternate corridor bypassing heavy intersections. Generally safe, but features lower pedestrian traffic near ${cleanDest}'s industrial/development zones. Recommended for daytime travel.`,
         features: ['80%+ Streetlight Coverage', 'Passive CCTV Security', 'Medium Density Crowds'],
         start: cleanStart,
-        destination: cleanDest
+        destination: cleanDest,
+        startCoords: sCoords,
+        destinationCoords: dCoords
       },
       {
         id: 'route-shortest',
@@ -93,7 +354,9 @@ export default function SafeRoutePage({ onStartJourney, onToast }: SafeRoutePage
         description: `Passes through narrow, dimly lit back alleys and industrial corridors between ${cleanStart} and ${cleanDest}. High incident rate with low cellular reception. Strictly avoid during night hours.`,
         features: ['Dims/Unlit Segments', 'Zero CCTV Surveillance', 'Low Connectivity Zones'],
         start: cleanStart,
-        destination: cleanDest
+        destination: cleanDest,
+        startCoords: sCoords,
+        destinationCoords: dCoords
       }
     ];
   };
@@ -126,12 +389,31 @@ export default function SafeRoutePage({ onStartJourney, onToast }: SafeRoutePage
 
     setCalculating(true);
     setShowResults(false);
+
+    // Resolve coordinates locally on search click if they are null
+    let resolvedStart = startCoords;
+    if (!resolvedStart) {
+      const local = localGeocode(start);
+      if (local) {
+        resolvedStart = { lat: local[0], lng: local[1] };
+        setStartCoords(resolvedStart);
+      }
+    }
+
+    let resolvedDest = destinationCoords;
+    if (!resolvedDest) {
+      const local = localGeocode(destination);
+      if (local) {
+        resolvedDest = { lat: local[0], lng: local[1] };
+        setDestinationCoords(resolvedDest);
+      }
+    }
     
     setTimeout(() => {
       setCalculating(false);
       setShowResults(true);
       setSelectedRouteIndex(0);
-      setRoutes(generateDynamicRoutes(start, destination, mode));
+      setRoutes(generateDynamicRoutes(start, destination, mode, resolvedStart, resolvedDest));
       onToast(`Safety route tracks generated for ${destination}!`, 'success');
     }, 1500);
   };
@@ -172,33 +454,82 @@ export default function SafeRoutePage({ onStartJourney, onToast }: SafeRoutePage
 
             <form onSubmit={handleSearch} className="space-y-4">
               {/* Origin input */}
-              <div className="space-y-1.5">
+              <div className="space-y-1.5 relative">
                 <label className="text-xs font-semibold text-slate-500 block">Starting Point</label>
                 <div className="relative">
                   <MapPin className="absolute left-3.5 top-3 w-4.5 h-4.5 text-teal-500" />
                   <input
                     type="text"
                     value={start}
-                    onChange={(e) => setStart(e.target.value)}
+                    onChange={(e) => handleStartChange(e.target.value)}
                     placeholder="Enter start location..."
-                    className="w-full text-sm pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 font-medium text-slate-800"
+                    className="w-full text-sm pl-10 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 font-medium text-slate-800"
                   />
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleUseCurrentLocation();
+                    }}
+                    className="absolute right-3.5 top-3 text-slate-400 hover:text-violet-600 transition cursor-pointer"
+                    title="Use current location"
+                  >
+                    <Navigation className="w-4.5 h-4.5 fill-current animate-pulse" />
+                  </button>
                 </div>
+
+                {/* Dropdown for Starting point */}
+                {showStartDropdown && startPredictions.length > 0 && (
+                  <div 
+                    onClick={(e) => e.stopPropagation()}
+                    className="absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg z-50 max-h-60 overflow-y-auto font-medium"
+                  >
+                    {startPredictions.map((pred) => (
+                      <button
+                        key={pred.place_id}
+                        type="button"
+                        onClick={() => handleSelectStartSuggestion(pred)}
+                        className="w-full text-left px-4 py-2.5 hover:bg-slate-50 text-xs font-semibold text-slate-700 transition border-b border-slate-100 last:border-b-0 cursor-pointer"
+                      >
+                        {pred.description}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Destination input */}
-              <div className="space-y-1.5">
+              <div className="space-y-1.5 relative">
                 <label className="text-xs font-semibold text-slate-500 block">Where are you heading?</label>
                 <div className="relative">
                   <MapPin className="absolute left-3.5 top-3 w-4.5 h-4.5 text-rose-500" />
                   <input
                     type="text"
                     value={destination}
-                    onChange={(e) => setDestination(e.target.value)}
+                    onChange={(e) => handleDestChange(e.target.value)}
                     placeholder="Enter destination..."
                     className="w-full text-sm pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 font-medium text-slate-800"
                   />
                 </div>
+
+                {/* Dropdown for Destination */}
+                {showDestDropdown && destPredictions.length > 0 && (
+                  <div 
+                    onClick={(e) => e.stopPropagation()}
+                    className="absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg z-50 max-h-60 overflow-y-auto font-medium"
+                  >
+                    {destPredictions.map((pred) => (
+                      <button
+                        key={pred.place_id}
+                        type="button"
+                        onClick={() => handleSelectDestSuggestion(pred)}
+                        className="w-full text-left px-4 py-2.5 hover:bg-slate-50 text-xs font-semibold text-slate-700 transition border-b border-slate-100 last:border-b-0 cursor-pointer"
+                      >
+                        {pred.description}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Travel Mode selector */}
@@ -264,6 +595,9 @@ export default function SafeRoutePage({ onStartJourney, onToast }: SafeRoutePage
               start={start}
               destination={destination}
               onRoutesResolved={handleRoutesResolved}
+              startCoords={startCoords}
+              destinationCoords={destinationCoords}
+              userLocation={userLocation}
             />
           </div>
 

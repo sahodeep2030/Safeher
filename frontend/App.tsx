@@ -2,22 +2,31 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Shield, Home, Navigation, AlertTriangle, FileText, Users, User, X, LogIn, Heart, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Page, RouteInfo, IncidentReport } from './types';
-
 // Firebase imports
-import { auth, db, isConfigured, seedInitialData } from './firebase';
-import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { auth, db, isConfigured, seedInitialData } from './services/firebase';
+import { onAuthStateChanged, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword, updateProfile, sendPasswordResetEmail } from 'firebase/auth';
 import { collection, onSnapshot, query, addDoc } from 'firebase/firestore';
+
+// Hook imports
+import { useGeolocation } from './hooks/useGeolocation';
+import { useRiskDetection } from './hooks/useRiskDetection';
+import { useEmergency } from './context/EmergencyContext';
+
+// Component imports
+import AuthForm from './components/AuthForm';
+import WarningModal from './components/WarningModal';
+import VoiceAssistant from './components/VoiceAssistant';
 
 // Page imports
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
-import LandingPage from './components/LandingPage';
-import SafeRoutePage from './components/SafeRoutePage';
-import LiveMonitoringPage from './components/LiveMonitoringPage';
-import EmergencyPage from './components/EmergencyPage';
-import IncidentReportingPage from './components/IncidentReportingPage';
-import CommunityPage from './components/CommunityPage';
-import ProfilePage from './components/ProfilePage';
+import LandingPage from './pages/LandingPage';
+import SafeRoutePage from './pages/SafeRoutePage';
+import LiveMonitoringPage from './pages/LiveMonitoringPage';
+import EmergencyPage from './pages/EmergencyPage';
+import IncidentReportingPage from './pages/IncidentReportingPage';
+import CommunityPage from './pages/CommunityPage';
+import ProfilePage from './pages/ProfilePage';
 
 interface Toast {
   id: string;
@@ -27,10 +36,30 @@ interface Toast {
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState<Page>('home');
-  const [isLoggedIn, setIsLoggedIn] = useState(true); // Logged in by default with mock profile
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [currentUser, setCurrentUser] = useState<{ email: string | null; displayName: string | null } | null>(null);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [activeRoute, setActiveRoute] = useState<RouteInfo | null>(null);
   const [customReports, setCustomReports] = useState<IncidentReport[]>([]);
+
+  // Safety & AI Assistant hooks
+  const { location, error: geoError, isTracking, startTracking, stopTracking, setLocation } = useGeolocation();
+  const { safetyLevel, riskScore, triggerWarning, cancelWarning, triggerEmergency } = useEmergency();
+
+  const { warningCountdown, isDeviated, setIsDeviated } = useRiskDetection({
+    latitude: location ? location.latitude : null,
+    longitude: location ? location.longitude : null,
+    speed: location ? location.speed : null,
+    isSimulatedDev: false,
+    isActive: isTracking,
+  });
+
+  // Escalate UI Page dynamically to Emergency cockpit during SOS Mode
+  useEffect(() => {
+    if (safetyLevel === 'emergency') {
+      setCurrentPage('emergency');
+    }
+  }, [safetyLevel]);
 
   // Seed initial data if Firebase is configured
   useEffect(() => {
@@ -74,8 +103,13 @@ export default function App() {
       const unsubscribe = onAuthStateChanged(auth, (user) => {
         if (user) {
           setIsLoggedIn(true);
+          setCurrentUser({
+            email: user.email,
+            displayName: user.displayName || user.email?.split('@')[0] || 'User',
+          });
         } else {
           setIsLoggedIn(false);
+          setCurrentUser(null);
         }
       });
       return () => unsubscribe();
@@ -84,10 +118,6 @@ export default function App() {
 
   // Toast System State
   const [toasts, setToasts] = useState<Toast[]>([]);
-
-  // Authentication Fields state
-  const [loginEmail, setLoginEmail] = useState('');
-  const [loginPassword, setLoginPassword] = useState('');
 
   // Floating Notification Toast Dispatcher
   const handleToast = (message: string, type: 'info' | 'success' | 'warn') => {
@@ -118,13 +148,14 @@ export default function App() {
   // Launch Active Journey from Safe Route Finder
   const handleStartJourney = (route: RouteInfo) => {
     setActiveRoute(route);
+    startTracking();
     handlePageChange('live-trip');
     handleToast(`Tracking initiated for ${route.name}!`, 'success');
   };
 
   // Submit new incident from reporter form
   const handleAddIncidentReport = async (reportData: any) => {
-    const formattedReport = {
+    const formattedReport: Omit<IncidentReport, 'id'> = {
       type: reportData.type,
       description: reportData.description,
       dateTime: 'Reported just now',
@@ -156,39 +187,69 @@ export default function App() {
     handlePageChange('community');
   };
 
-  // Login Action with Firebase Integration and mockup fallback
-  const handleLoginSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!loginEmail.trim() || !loginPassword.trim()) {
-      handleToast('Please fill out all credentials', 'warn');
+  const handleAuthSubmit = async (
+    mode: 'login' | 'signup' | 'forgot',
+    data: { email: string; password?: string; displayName?: string }
+  ) => {
+    const { email, password, displayName } = data;
+    if (mode !== 'forgot' && !password) return;
+
+    if (mode === 'forgot') {
+      try {
+        if (isConfigured && auth) {
+          await sendPasswordResetEmail(auth, email);
+          handleToast('Security link sent! Check your inbox to reset password.', 'success');
+        } else {
+          handleToast(`Simulated reset link sent to ${email} (Mock Mode Active)!`, 'success');
+        }
+      } catch (err: any) {
+        throw new Error(err.message || 'Failed to send password reset email.');
+      }
       return;
     }
 
     if (isConfigured && auth) {
-      try {
-        await signInWithEmailAndPassword(auth, loginEmail, loginPassword);
+      if (mode === 'signup') {
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        if (displayName) {
+          await updateProfile(userCredential.user, { displayName });
+        }
+        setCurrentUser({
+          email: userCredential.user.email,
+          displayName: displayName || userCredential.user.email?.split('@')[0] || 'User',
+        });
+        setIsLoggedIn(true);
+        setLoginModalOpen(false);
+        handleToast('Account registered and logged in successfully!', 'success');
+      } else {
+        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        setCurrentUser({
+          email: userCredential.user.email,
+          displayName: userCredential.user.displayName || userCredential.user.email?.split('@')[0] || 'User',
+        });
+        setIsLoggedIn(true);
         setLoginModalOpen(false);
         handleToast('Welcome back! Firebase Session Active.', 'success');
-      } catch (error: any) {
-        console.error("Firebase Login Error:", error);
-        if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential' || error.code === 'auth/invalid-email') {
-          // Auto-registration for convenience in this prototype/demo
-          try {
-            const { createUserWithEmailAndPassword } = await import('firebase/auth');
-            await createUserWithEmailAndPassword(auth, loginEmail, loginPassword);
-            setLoginModalOpen(false);
-            handleToast('Account registered and logged in successfully!', 'success');
-          } catch (signUpErr: any) {
-            handleToast(`Firebase Credentials Error: ${error.message}`, 'warn');
-          }
-        } else {
-          handleToast(`Authentication failed: ${error.message}`, 'warn');
-        }
       }
     } else {
-      setIsLoggedIn(true);
-      setLoginModalOpen(false);
-      handleToast('Welcome back, Aria Sharma! (Mock Session Active)', 'success');
+      // Mock mode fallback
+      if (mode === 'signup') {
+        setIsLoggedIn(true);
+        setCurrentUser({
+          email,
+          displayName: displayName || email.split('@')[0],
+        });
+        setLoginModalOpen(false);
+        handleToast(`Account registered (Mock Mode Active)! Welcome, ${displayName || email.split('@')[0]}.`, 'success');
+      } else {
+        setIsLoggedIn(true);
+        setCurrentUser({
+          email,
+          displayName: displayName || email.split('@')[0] || 'Aria Sharma',
+        });
+        setLoginModalOpen(false);
+        handleToast('Welcome back! (Mock Session Active)', 'success');
+      }
     }
   };
 
@@ -202,13 +263,34 @@ export default function App() {
       }
     } else {
       setIsLoggedIn(false);
+      setCurrentUser(null);
       handleToast('Logged out of SafeHer session.', 'info');
     }
   };
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 relative pb-16 md:pb-0">
-      
+
+      {/* Voice Assistant Speech Engine Utility */}
+      <VoiceAssistant />
+
+      {/* Warning Overlay Modal for level 2 Alerts */}
+      {safetyLevel === 'warning' && warningCountdown !== null && (
+        <WarningModal
+          countdown={warningCountdown}
+          onConfirmSafe={cancelWarning}
+          onTriggerEmergency={() => {
+            triggerEmergency(
+              'User pressed NEED HELP',
+              location?.latitude || 0,
+              location?.longitude || 0,
+              100, // mock battery
+              location?.speed || 0
+            );
+          }}
+        />
+      )}
+
       {/* 1. Header Navigation */}
       <Navbar
         currentPage={currentPage}
@@ -216,6 +298,7 @@ export default function App() {
         onOpenLoginModal={() => setLoginModalOpen(true)}
         isLoggedIn={isLoggedIn}
         onLogout={handleLogoutAction}
+        currentUser={currentUser}
       />
 
       {/* 2. Main SPA Render Router with Framer Motion slide-up */}
@@ -228,55 +311,77 @@ export default function App() {
             exit={{ opacity: 0, y: -15 }}
             transition={{ duration: 0.25, ease: 'easeInOut' }}
           >
-            {currentPage === 'home' && (
-              <LandingPage
-                onNavigateTo={handlePageChange}
-                onOpenLoginModal={() => setLoginModalOpen(true)}
-                isLoggedIn={isLoggedIn}
-              />
-            )}
+            {!isLoggedIn && currentPage !== 'home' ? (
+              <div className="max-w-7xl mx-auto px-4 py-16 flex flex-col items-center justify-center min-h-[60vh]">
+                <div className="w-full max-w-md space-y-4">
+                  <div className="p-4 bg-violet-50 text-violet-800 rounded-3xl border border-violet-100 text-center text-xs font-semibold">
+                    🔑 Access Required: Please sign in or create an account to use this SafeHer feature.
+                  </div>
+                  <AuthForm
+                    onSubmit={handleAuthSubmit}
+                    isMockMode={!isConfigured}
+                  />
+                </div>
+              </div>
+            ) : (
+              <>
+                {currentPage === 'home' && (
+                  <LandingPage
+                    onNavigateTo={handlePageChange}
+                    onOpenLoginModal={() => setLoginModalOpen(true)}
+                    isLoggedIn={isLoggedIn}
+                  />
+                )}
 
-            {currentPage === 'safe-route' && (
-              <SafeRoutePage
-                onStartJourney={handleStartJourney}
-                onToast={handleToast}
-              />
-            )}
+                {currentPage === 'safe-route' && (
+                  <SafeRoutePage
+                    onStartJourney={handleStartJourney}
+                    onToast={handleToast}
+                    userLocation={location}
+                  />
+                )}
 
-            {currentPage === 'live-trip' && (
-              <LiveMonitoringPage
-                activeRoute={activeRoute}
-                onToast={handleToast}
-                onNavigateTo={handlePageChange}
-              />
-            )}
+                {currentPage === 'live-trip' && (
+                  <LiveMonitoringPage
+                    activeRoute={activeRoute}
+                    onToast={handleToast}
+                    onNavigateTo={handlePageChange}
+                    userLocation={location}
+                    isTracking={isTracking}
+                    stopTracking={stopTracking}
+                  />
+                )}
 
-            {currentPage === 'emergency' && (
-              <EmergencyPage
-                onToast={handleToast}
-              />
-            )}
+                {currentPage === 'emergency' && (
+                  <EmergencyPage
+                    onToast={handleToast}
+                    currentUser={currentUser}
+                  />
+                )}
 
-            {currentPage === 'report' && (
-              <IncidentReportingPage
-                onToast={handleToast}
-                onSubmitReport={handleAddIncidentReport}
-              />
-            )}
+                {currentPage === 'report' && (
+                  <IncidentReportingPage
+                    onToast={handleToast}
+                    onSubmitReport={handleAddIncidentReport}
+                  />
+                )}
 
-            {currentPage === 'community' && (
-              <CommunityPage
-                onToast={handleToast}
-                customReports={customReports}
-                isDbActive={isConfigured}
-              />
-            )}
+                {currentPage === 'community' && (
+                  <CommunityPage
+                    onToast={handleToast}
+                    customReports={customReports}
+                    isDbActive={isConfigured}
+                  />
+                )}
 
-            {currentPage === 'profile' && (
-              <ProfilePage
-                onToast={handleToast}
-                onNavigateTo={handlePageChange}
-              />
+                {currentPage === 'profile' && (
+                  <ProfilePage
+                    onToast={handleToast}
+                    onNavigateTo={handlePageChange}
+                    currentUser={currentUser}
+                  />
+                )}
+              </>
             )}
           </motion.div>
         </AnimatePresence>
@@ -289,9 +394,8 @@ export default function App() {
       <nav id="safeher-mobile-bottom-bar" className="fixed bottom-0 inset-x-0 bg-white/95 backdrop-blur-md border-t border-slate-200 z-30 flex md:hidden items-center justify-around h-16 px-2">
         <button
           onClick={() => handlePageChange('home')}
-          className={`flex flex-col items-center justify-center w-12 h-12 rounded-xl transition cursor-pointer ${
-            currentPage === 'home' ? 'text-violet-600 font-bold' : 'text-slate-500'
-          }`}
+          className={`flex flex-col items-center justify-center w-12 h-12 rounded-xl transition cursor-pointer ${currentPage === 'home' ? 'text-violet-600 font-bold' : 'text-slate-500'
+            }`}
         >
           <Home className="w-5 h-5" />
           <span className="text-[9px] mt-0.5 font-bold">Home</span>
@@ -299,9 +403,8 @@ export default function App() {
 
         <button
           onClick={() => handlePageChange('safe-route')}
-          className={`flex flex-col items-center justify-center w-12 h-12 rounded-xl transition cursor-pointer ${
-            currentPage === 'safe-route' ? 'text-violet-600 font-bold' : 'text-slate-500'
-          }`}
+          className={`flex flex-col items-center justify-center w-12 h-12 rounded-xl transition cursor-pointer ${currentPage === 'safe-route' ? 'text-violet-600 font-bold' : 'text-slate-500'
+            }`}
         >
           <Navigation className="w-5 h-5" />
           <span className="text-[9px] mt-0.5 font-bold">Route</span>
@@ -317,9 +420,8 @@ export default function App() {
 
         <button
           onClick={() => handlePageChange('report')}
-          className={`flex flex-col items-center justify-center w-12 h-12 rounded-xl transition cursor-pointer ${
-            currentPage === 'report' ? 'text-violet-600 font-bold' : 'text-slate-500'
-          }`}
+          className={`flex flex-col items-center justify-center w-12 h-12 rounded-xl transition cursor-pointer ${currentPage === 'report' ? 'text-violet-600 font-bold' : 'text-slate-500'
+            }`}
         >
           <FileText className="w-5 h-5" />
           <span className="text-[9px] mt-0.5 font-bold">Report</span>
@@ -327,9 +429,8 @@ export default function App() {
 
         <button
           onClick={() => handlePageChange('community')}
-          className={`flex flex-col items-center justify-center w-12 h-12 rounded-xl transition cursor-pointer ${
-            currentPage === 'community' ? 'text-violet-600 font-bold' : 'text-slate-500'
-          }`}
+          className={`flex flex-col items-center justify-center w-12 h-12 rounded-xl transition cursor-pointer ${currentPage === 'community' ? 'text-violet-600 font-bold' : 'text-slate-500'
+            }`}
         >
           <Users className="w-5 h-5" />
           <span className="text-[9px] mt-0.5 font-bold">Grid</span>
@@ -351,57 +452,13 @@ export default function App() {
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="fixed inset-x-4 top-[15%] md:top-[25%] mx-auto z-50 max-w-sm bg-white rounded-3xl border border-slate-100 shadow-2xl p-6"
+              className="fixed inset-x-4 top-[15%] md:top-[20%] mx-auto z-50 max-w-md"
             >
-              <div className="flex justify-between items-center pb-4 border-b border-slate-100 mb-4">
-                <div className="flex items-center gap-1.5 text-slate-800">
-                  <Shield className="w-5 h-5 text-violet-600" />
-                  <span className="text-sm font-bold">Sign In to SafeHer Hub</span>
-                </div>
-                <button
-                  onClick={() => setLoginModalOpen(false)}
-                  className="p-1 rounded-lg text-slate-400 hover:bg-slate-100 cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              <form onSubmit={handleLoginSubmit} className="space-y-4">
-                <div className="space-y-1">
-                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Email Address</label>
-                  <input
-                    type="email"
-                    value={loginEmail}
-                    onChange={(e) => setLoginEmail(e.target.value)}
-                    placeholder="aria@safeher-grid.org"
-                    className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-violet-500 font-medium text-slate-800"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Password</label>
-                  <input
-                    type="password"
-                    value={loginPassword}
-                    onChange={(e) => setLoginPassword(e.target.value)}
-                    placeholder="••••••••••••"
-                    className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-violet-500"
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  className="w-full bg-violet-600 hover:bg-violet-700 text-white font-bold py-2.5 rounded-xl text-xs shadow-sm hover:shadow-md transition cursor-pointer"
-                >
-                  Confirm Sign In
-                </button>
-              </form>
-
-              <div className="pt-4 mt-4 border-t border-slate-100 text-center">
-                <p className="text-[10px] text-slate-400 font-medium">
-                  Don't have an encrypted key? <a href="#" onClick={(e) => { e.preventDefault(); handleToast('Demo account: Enter any email/password to sign in.', 'info'); }} className="text-violet-600 font-bold underline">Create Credentials</a>
-                </p>
-              </div>
+              <AuthForm
+                onSubmit={handleAuthSubmit}
+                onClose={() => setLoginModalOpen(false)}
+                isMockMode={!isConfigured}
+              />
             </motion.div>
           </>
         )}
@@ -416,18 +473,17 @@ export default function App() {
               initial={{ opacity: 0, x: 50, scale: 0.9 }}
               animate={{ opacity: 1, x: 0, scale: 1 }}
               exit={{ opacity: 0, x: 50, scale: 0.9 }}
-              className={`p-3.5 rounded-2xl shadow-lg border text-xs font-semibold flex items-start gap-2.5 pointer-events-auto glass-panel ${
-                toast.type === 'success'
+              className={`p-3.5 rounded-2xl shadow-lg border text-xs font-semibold flex items-start gap-2.5 pointer-events-auto glass-panel ${toast.type === 'success'
                   ? 'border-emerald-200 bg-emerald-50/90 text-emerald-900'
                   : toast.type === 'warn'
-                  ? 'border-rose-200 bg-rose-50/90 text-rose-900'
-                  : 'border-violet-100 bg-violet-50/90 text-violet-900'
-              }`}
+                    ? 'border-rose-200 bg-rose-50/90 text-rose-900'
+                    : 'border-violet-100 bg-violet-50/90 text-violet-900'
+                }`}
             >
               {toast.type === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />}
               {toast.type === 'warn' && <AlertCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />}
               {toast.type === 'info' && <Shield className="w-4 h-4 text-violet-600 shrink-0 mt-0.5" />}
-              
+
               <div className="flex-1">
                 <p className="leading-snug">{toast.message}</p>
               </div>

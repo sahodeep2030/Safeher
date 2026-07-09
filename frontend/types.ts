@@ -19,6 +19,8 @@ export interface RouteInfo {
   features: string[];
   start?: string;
   destination?: string;
+  startCoords?: { lat: number; lng: number };
+  destinationCoords?: { lat: number; lng: number };
 }
 
 export interface EmergencyContact {

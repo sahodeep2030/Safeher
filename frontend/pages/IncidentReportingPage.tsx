@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { FileText, MapPin, Calendar, Clock, Image, ShieldAlert, Sparkles, AlertTriangle, EyeOff, CheckCircle } from 'lucide-react';
-import MapPlaceholder from './MapPlaceholder';
+import MapPlaceholder from '../components/MapPlaceholder';
 
 interface IncidentReportingPageProps {
   onToast: (msg: string, type: 'info' | 'success' | 'warn') => void;

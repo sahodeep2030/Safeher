@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { motion } from 'motion/react';
 import { Users, Filter, Star, AlertTriangle, Eye, ThumbsUp, Landmark, ShieldCheck, HelpCircle, MessageSquare } from 'lucide-react';
 import { IncidentReport, CommunityComment } from '../types';
-import MapPlaceholder from './MapPlaceholder';
-import { db } from '../firebase';
+import MapPlaceholder from '../components/MapPlaceholder';
+import { db } from '../services/firebase';
 import { doc, updateDoc, increment } from 'firebase/firestore';
 
 interface CommunityPageProps {
